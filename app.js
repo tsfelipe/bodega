@@ -462,6 +462,10 @@ async function fichaEquipo(e) {
   if (puede("inv_ingresar") && (!unidad || e.estado === "baja")) {
     acciones.push(`<button class="btn claro" data-a="ingresar">${unidad ? "Reactivar" : "Ingresar unidades"}</button>`);
   }
+  // por unidad, cada máquina es un registro: «ingresar más» = registrar otra igual con su propio código
+  if (puede("inv_editar") && unidad && e.estado === "activo") {
+    acciones.push('<button class="btn claro" data-a="copia">Agregar otra igual</button>');
+  }
   if (puede("inv_baja") && e.estado === "activo") acciones.push('<button class="btn claro" data-a="baja">Dar de baja</button>');
   if (puede("eliminar") || puede("super")) acciones.push('<button class="btn peligro" data-a="eliminar">Eliminar</button>');
   const v = abrirVentana({
@@ -470,7 +474,7 @@ async function fichaEquipo(e) {
       <dl class="ficha" style="margin-top:12px">
         <dt>Código</dt><dd>${h(e.codigo)}</dd>
         <dt>Categoría</dt><dd>${h(e.categoria || "—")}</dd>
-        <dt>Se controla</dt><dd>${unidad ? "Por unidad" : "Por cantidad"}</dd>
+        <dt>Se controla</dt><dd>${unidad ? "Por unidad (cada máquina con su código)" : "Por cantidad"}</dd>
         ${e.serial ? `<dt>Serial o placa</dt><dd>${h(e.serial)}</dd>` : ""}
         <dt>En bodega</dt><dd>${e.disponible} de ${e.cantidad_total}</dd>
         <dt>Por hora</dt><dd>${e.tarifa_hora ? pesos(e.tarifa_hora) : "Sin tarifa"}</dd>
@@ -488,6 +492,7 @@ async function fichaEquipo(e) {
   v.querySelectorAll("[data-a]").forEach((b) => {
     b.onclick = () => (v.cerrar(), {
       editar: () => formEquipo(e), ingresar: () => formIngreso(e), baja: () => formBaja(e), total: () => formEquipoTotal(e),
+      copia: () => formEquipo(null, e),
       eliminar: () => pedirMotivo({
         titulo: `Eliminar ${h(e.nombre)}`,
         mensaje: "El equipo se va a la papelera; desde ahí se puede restaurar. Si ya se usó en cotizaciones o alquileres no se puede eliminar: en ese caso dele de baja.",
@@ -509,25 +514,39 @@ async function fichaEquipo(e) {
   } catch { /* la ventana pudo cerrarse */ }
 }
 
-function formEquipo(e = null) {
+// siguiente código libre: HOR-01 -> HOR-02 (si ya existe, sigue contando)
+function siguienteCodigo(codigo) {
+  const usados = new Set((E.datos.equipos || []).map((x) => x.codigo));
+  const m = String(codigo).match(/^(.*?)(\d+)$/);
+  let base = m ? m[1] : codigo + "-", n = m ? Number(m[2]) : 1;
+  const ancho = m ? m[2].length : 2;
+  let nuevo;
+  do { n += 1; nuevo = base + String(n).padStart(ancho, "0"); } while (usados.has(nuevo));
+  return nuevo;
+}
+
+/* e = equipo a editar; copia = equipo del que se toman los datos para registrar otro igual */
+function formEquipo(e = null, copia = null) {
   const nuevo = !e;
+  const base = e || copia;
   const campos = [
-    { k: "codigo", e: "Código", v: e?.codigo, req: true },
-    { k: "nombre", e: "Nombre", v: e?.nombre, req: true },
-    { k: "categoria", e: "Categoría", v: e?.categoria, lista: categorias(), nota: "Por ejemplo: Maquinaria pesada, Formaletas, Concreto." },
+    { k: "codigo", e: "Código", v: copia ? siguienteCodigo(copia.codigo) : e?.codigo, req: true,
+      nota: copia ? "Cada máquina lleva su propio código; se sugiere el siguiente." : "" },
+    { k: "nombre", e: "Nombre", v: base?.nombre, req: true },
+    { k: "categoria", e: "Categoría", v: base?.categoria, lista: categorias(), nota: "Por ejemplo: Maquinaria pesada, Formaletas, Concreto." },
   ];
   if (nuevo) {
-    campos.push({ k: "control", e: "¿Cómo se controla?", t: "select", v: "unidad",
+    campos.push({ k: "control", e: "¿Cómo se controla?", t: "select", v: copia ? copia.control : "unidad",
       op: [["unidad", "Por unidad: una máquina con su serial"], ["cantidad", "Por cantidad: formaletas, herramienta menor"]] });
     campos.push({ k: "cantidad", e: "Cantidad inicial", t: "numero", v: 1, min: 1, nota: "Solo cuenta para equipos por cantidad." });
     campos.push({ k: "fecha_ingreso", e: "Fecha de ingreso", t: "fecha", v: ahoraLocal() });
   }
   campos.push({ k: "serial", e: "Serial o placa", v: e?.serial },
-    { k: "tarifa_hora", e: "Valor por hora", t: "dinero", v: e?.tarifa_hora ?? 0 },
-    { k: "tarifa_dia", e: "Valor por día", t: "dinero", v: e?.tarifa_dia ?? 0 },
+    { k: "tarifa_hora", e: "Valor por hora", t: "dinero", v: base?.tarifa_hora ?? 0 },
+    { k: "tarifa_dia", e: "Valor por día", t: "dinero", v: base?.tarifa_dia ?? 0 },
     { k: "notas", e: "Notas", t: "nota", v: e?.notas });
   formulario({
-    titulo: nuevo ? "Nuevo equipo" : `Editar ${h(e.nombre)}`, campos,
+    titulo: copia ? `Otra máquina igual a ${h(copia.nombre)}` : nuevo ? "Nuevo equipo" : `Editar ${h(e.nombre)}`, campos,
     textoGuardar: nuevo ? "Registrar equipo" : "Guardar cambios",
     guardar: async (d) => {
       await api("bod_equipo_guardar", { p_id: e?.id ?? null, p_datos: d });
@@ -574,6 +593,9 @@ function formEquipoTotal(e) {
   const campos = [
     { k: "codigo", e: "Código", v: e.codigo, req: true }, { k: "nombre", e: "Nombre", v: e.nombre, req: true },
     { k: "categoria", e: "Categoría", v: e.categoria, lista: categorias() }, { k: "serial", e: "Serial o placa", v: e.serial },
+    { k: "control", e: "Se controla", t: "select", v: e.control,
+      op: [["unidad", "Por unidad (una sola máquina)"], ["cantidad", "Por cantidad (varias unidades iguales)"]],
+      nota: "Si una máquina se registró por unidad y en realidad hay varias iguales, pásela a «por cantidad»." },
     { k: "cantidad_total", e: "Cantidad total", t: "numero", v: e.cantidad_total, nota: `Ahora hay ${e.alquilado} afuera; no puede quedar por debajo de eso.` },
     { k: "tarifa_hora", e: "Valor por hora", t: "dinero", v: e.tarifa_hora }, { k: "tarifa_dia", e: "Valor por día", t: "dinero", v: e.tarifa_dia },
     { k: "estado", e: "Estado", t: "select", v: e.estado, op: [["activo", "Activo"], ["baja", "De baja"]] },
