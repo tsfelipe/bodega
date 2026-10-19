@@ -65,6 +65,8 @@ a { color: var(--foco); }
 .nav a svg { width: 20px; height: 20px; }
 .nav a[aria-current="page"] { color: var(--texto); border-bottom-color: var(--seguridad); }
 .nav a:hover { color: var(--texto); }
+.nav a.solo-movil { display: none; }
+@media (max-width: 760px) { .nav a.solo-movil { display: flex; } }
 
 /* --------------------------------------------------------------- páginas */
 main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 96px; }
@@ -186,6 +188,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--foco); outline: 
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; border-top: 1px solid var(--linea);
     border-bottom: 0; justify-content: space-around; padding: 0 4px env(safe-area-inset-bottom);
   }
+  .nav a:not(.en-movil):not(.solo-movil) { display: none; }
   .nav a { flex-direction: column; gap: 2px; font-size: 12px; padding: 8px 6px 7px; border-bottom: 0; border-top: 3px solid transparent; }
   .nav a[aria-current="page"] { border-top-color: var(--seguridad); }
   main { padding: 14px 12px 100px; }
@@ -208,4 +211,43 @@ input:focus, select:focus, textarea:focus { border-color: var(--foco); outline: 
 @media (prefers-reduced-motion: no-preference) {
   .ventana { animation: entra .16s ease-out; }
   @keyframes entra { from { transform: translateY(12px); opacity: .6; } }
+}
+
+/* ------------------------------------------------------- piezas de la etapa 3-5 */
+.ventana.ancha { width: min(1060px, 100%); }
+.mas-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.mas-lista a { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 16px; background: var(--placa);
+  border-radius: var(--radio); box-shadow: var(--sombra); color: var(--texto); text-decoration: none; font-weight: 600; }
+.mas-lista svg { width: 26px; height: 26px; }
+.renglones { width: 100%; border-collapse: collapse; margin: 8px 0 4px; }
+.renglones th { text-align: left; font-size: 13.5px; color: var(--suave); font-weight: 600; padding: 6px 6px; border-bottom: 1px solid var(--linea); }
+.renglones td { padding: 8px 6px; border-bottom: 1px solid #edf0f2; vertical-align: middle; }
+.renglones .num { text-align: right; white-space: nowrap; }
+.renglones .quitar { background: none; border: 0; color: var(--rojo-t); font-size: 22px; cursor: pointer; padding: 0 6px; }
+.agregar-renglon { display: grid; grid-template-columns: 2.4fr .8fr 1fr 1fr 1.3fr auto; gap: 8px; align-items: end; background: #f6f7f8;
+  border-radius: var(--radio); padding: 12px; margin-bottom: 8px; }
+.agregar-renglon label { font-size: 13px; font-weight: 600; color: var(--suave); display: block; margin-bottom: 3px; }
+.totales { text-align: right; font-weight: 700; font-size: 17px; margin: 6px 0 0; }
+.totales span { color: var(--suave); font-weight: 500; margin-left: 14px; }
+.calculo { background: #f2f6fb; border: 1.5px solid #cfe0f5; border-radius: 8px; padding: 12px 14px; font-weight: 700; font-size: 17px; margin: 6px 0 12px; }
+.calculo small { display: block; font-weight: 500; color: var(--suave); font-size: 14px; }
+.casillas { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+.casillas fieldset { border: 1.5px solid var(--linea); border-radius: var(--radio); padding: 8px 12px 10px; margin: 0; }
+.casillas legend { font-weight: 700; padding: 0 4px; }
+.casillas label { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; font-weight: 500; }
+.casillas input { margin-top: 4px; width: 18px; height: 18px; flex: none; }
+.casillas .super-casilla { background: #fff8d6; border-radius: 6px; padding: 4px 6px; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.check input { width: 20px; height: 20px; }
+.cabeza-alquiler { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; margin-bottom: 6px; }
+.cabeza-alquiler div { font-weight: 600; }
+.cabeza-alquiler small { display: block; color: var(--suave); font-weight: 500; font-size: 13.5px; }
+.grupo-botones { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.grupo-botones .btn { min-height: 42px; padding: 0 14px; }
+@media (max-width: 760px) {
+  .agregar-renglon { grid-template-columns: 1fr 1fr; }
+  .agregar-renglon .ancho { grid-column: 1 / -1; }
+  .renglones thead { display: none; }
+  .renglones tr { display: grid; grid-template-columns: 1fr auto; border-bottom: 1px solid var(--linea); padding: 6px 0; }
+  .renglones td { border: 0; padding: 2px 4px; }
 }
