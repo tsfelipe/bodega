@@ -3,5 +3,5 @@
 // NUNCA ponga aquí la "secret key" ni la contraseña de la base de datos.
 window.BODEGA = {
   url: "https://mottuufqapvrqirifkvn.supabase.co",
-  clave: "PEGUE_AQUI_LA_PUBLISHABLE_KEY",
+  clave: "sb_publishable_ye99OK6zwEw7opdks1ODxQ_-s7Z7glb",
 };
