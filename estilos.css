@@ -251,3 +251,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--foco); outline: 
   .renglones tr { display: grid; grid-template-columns: 1fr auto; border-bottom: 1px solid var(--linea); padding: 6px 0; }
   .renglones td { border: 0; padding: 2px 4px; }
 }
+
+/* Cobros del equipo: [unidad ▾] [valor] [✕] */
+.tarifas { display: grid; gap: 8px; }
+.tarifa-renglon { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.tarifa-renglon select, .tarifa-renglon input { width: 100%; margin: 0; }
+.btn.chico { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+.tarifa-renglon .quitar { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+.campo [data-mas-tarifa] { margin-top: 8px; }

@@ -142,6 +142,46 @@ function abrirVentana({ titulo, cuerpo, pie = "", ancha = false }) {
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") cerrarVentana(); });
 
 /* campos: [{k, e (etiqueta), t: texto|numero|dinero|fecha|select|nota|clave, v, op:[[valor,texto]], nota, req, lista}] */
+/* Cobros de un equipo: cada renglón es [unidad ▾] [valor]. Se guardan como tarifa_hora / tarifa_dia / tarifa_m3. */
+const COBROS = [["dia", "Por día"], ["hora", "Por hora"], ["m3", "Por metro cúbico (m³)"]];
+function montarTarifas(caja, valores) {
+  const boton = caja.nextElementSibling;
+  const renglon = (unidad, valor) => {
+    const r = document.createElement("div");
+    r.className = "tarifa-renglon";
+    r.innerHTML = `<select aria-label="Se cobra">${COBROS.map(([k, t]) => `<option value="${k}" ${k === unidad ? "selected" : ""}>${t}</option>`).join("")}</select>
+      <input type="number" min="0" step="1000" inputmode="numeric" aria-label="Valor" placeholder="Valor $" value="${valor || ""}">
+      <button type="button" class="btn claro chico quitar" aria-label="Quitar este cobro" title="Quitar">✕</button>`;
+    r.querySelector("select").onchange = acomodar;
+    r.querySelector(".quitar").onclick = () => { r.remove(); if (!caja.children.length) renglon(libre(), ""); acomodar(); };
+    caja.appendChild(r);
+    return r;
+  };
+  const usadas = () => [...caja.querySelectorAll("select")].map((s) => s.value);
+  const libre = () => COBROS.map(([k]) => k).find((k) => !usadas().includes(k)) || "dia";
+  function acomodar() {
+    const u = usadas();
+    caja.querySelectorAll("select").forEach((s) => s.querySelectorAll("option").forEach((o) => {
+      o.disabled = o.value !== s.value && u.includes(o.value);
+    }));
+    boton.classList.toggle("oculto", caja.children.length >= COBROS.length);
+  }
+  boton.onclick = () => { renglon(libre(), "").querySelector("input").focus(); acomodar(); };
+  const iniciales = COBROS.map(([k]) => k).filter((k) => Number(valores["tarifa_" + k]) > 0);
+  if (!iniciales.length) renglon("dia", "");
+  iniciales.forEach((k) => renglon(k, valores["tarifa_" + k]));
+  acomodar();
+}
+function leerTarifas(caja) {
+  const out = { tarifa_hora: 0, tarifa_dia: 0, tarifa_m3: 0 };
+  caja.querySelectorAll(".tarifa-renglon").forEach((r) => {
+    const k = r.querySelector("select").value, n = Number(r.querySelector("input").value || 0);
+    if (n < 0) throw new ErrorApi("El valor del cobro no puede ser negativo.", "X");
+    out["tarifa_" + k] = n;
+  });
+  return out;
+}
+
 function formulario({ titulo, intro = "", campos, textoGuardar = "Guardar", clase = "", guardar }) {
   const html = campos.map((c) => {
     const id = "c_" + c.k;
@@ -151,6 +191,8 @@ function formulario({ titulo, intro = "", campos, textoGuardar = "Guardar", clas
       control = `<select id="${id}">${c.op.map(([val, txt]) => `<option value="${h(val)}" ${String(val) === String(v) ? "selected" : ""}>${h(txt)}</option>`).join("")}</select>`;
     } else if (c.t === "nota") {
       control = `<textarea id="${id}">${h(v)}</textarea>`;
+    } else if (c.t === "tarifas") {
+      control = `<div id="${id}" class="tarifas"></div><button type="button" class="btn claro chico" data-mas-tarifa>+ Agregar otro cobro</button>`;
     } else {
       const tipo = { numero: "number", dinero: "number", fecha: "datetime-local", clave: "password" }[c.t] || "text";
       const extra = c.t === "dinero" ? 'min="0" step="1000" inputmode="numeric"' : c.t === "numero" ? `min="${c.min ?? 0}" step="${c.paso ?? 1}" inputmode="decimal"` : "";
@@ -165,16 +207,20 @@ function formulario({ titulo, intro = "", campos, textoGuardar = "Guardar", clas
     cuerpo: `${intro}<div class="error-campo oculto" role="alert"></div><form id="form-v" novalidate>${html}<button type="submit" class="oculto"></button></form>`,
     pie: `<button class="btn claro" data-cancelar>Cancelar</button><button class="btn ${clase}" data-guardar>${h(textoGuardar)}</button>`,
   });
-  const leer = () => Object.fromEntries(campos.map((c) => {
+  campos.filter((c) => c.t === "tarifas").forEach((c) => montarTarifas($("#c_" + c.k, v), c.v || {}));
+  const leer = () => Object.fromEntries(campos.flatMap((c) => {
     const el = $("#c_" + c.k, v);
+    if (c.t === "tarifas") return Object.entries(leerTarifas(el));
     let val = el.value;
     if (c.t === "fecha") val = deInput(val);
     if (c.t === "numero" || c.t === "dinero") val = val === "" ? null : Number(val);
     if (typeof val === "string" && c.t !== "clave") val = val.trim();
-    return [c.k, val];
+    return [[c.k, val]];
   }));
   const enviar = async () => {
-    const valores = leer();
+    const err0 = $(".error-campo", v);
+    let valores;
+    try { valores = leer(); } catch (e) { err0.textContent = e.message; err0.classList.remove("oculto"); return; }
     const vacio = campos.find((c) => c.req && (valores[c.k] === null || valores[c.k] === ""));
     const err = $(".error-campo", v);
     if (vacio) { err.textContent = `Falta: ${vacio.e}.`; err.classList.remove("oculto"); $("#c_" + vacio.k, v).focus(); return; }
@@ -544,10 +590,8 @@ function formEquipo(e = null, copia = null) {
     campos.push({ k: "fecha_ingreso", e: "Fecha de ingreso", t: "fecha", v: ahoraLocal() });
   }
   campos.push({ k: "serial", e: "Serial o placa", v: e?.serial },
-    { k: "tarifa_hora", e: "Valor por hora", t: "dinero", v: base?.tarifa_hora ?? 0 },
-    { k: "tarifa_dia", e: "Valor por día", t: "dinero", v: base?.tarifa_dia ?? 0 },
-    { k: "tarifa_m3", e: "Valor por metro cúbico (m³)", t: "dinero", v: base?.tarifa_m3 ?? 0,
-      nota: "Para lo que se cobra por concreto producido, como la hormigonera. Deje 0 si no aplica." },
+    { k: "tarifas", e: "¿Cómo se cobra?", t: "tarifas", v: base,
+      nota: "Escoja la unidad y escriba el valor. Si se cobra de varias formas (por ejemplo por día y por hora), agregue otro cobro." },
     { k: "notas", e: "Notas", t: "nota", v: e?.notas });
   formulario({
     titulo: copia ? `Otra máquina igual a ${h(copia.nombre)}` : nuevo ? "Nuevo equipo" : `Editar ${h(e.nombre)}`, campos,
@@ -601,8 +645,7 @@ function formEquipoTotal(e) {
       op: [["unidad", "Por unidad (una sola máquina)"], ["cantidad", "Por cantidad (varias unidades iguales)"]],
       nota: "Si una máquina se registró por unidad y en realidad hay varias iguales, pásela a «por cantidad»." },
     { k: "cantidad_total", e: "Cantidad total", t: "numero", v: e.cantidad_total, nota: `Ahora hay ${e.alquilado} afuera; no puede quedar por debajo de eso.` },
-    { k: "tarifa_hora", e: "Valor por hora", t: "dinero", v: e.tarifa_hora }, { k: "tarifa_dia", e: "Valor por día", t: "dinero", v: e.tarifa_dia },
-    { k: "tarifa_m3", e: "Valor por m³", t: "dinero", v: e.tarifa_m3 },
+    { k: "tarifas", e: "¿Cómo se cobra?", t: "tarifas", v: e },
     { k: "estado", e: "Estado", t: "select", v: e.estado, op: [["activo", "Activo"], ["baja", "De baja"]] },
     { k: "fecha_ingreso", e: "Fecha de ingreso", t: "fecha", v: e.fecha_ingreso },
     { k: "fecha_baja", e: "Fecha de baja", t: "fecha", v: e.fecha_baja },
@@ -615,7 +658,9 @@ function formEquipoTotal(e) {
     campos,
     guardar: async (d) => {
       const cambios = {};
-      for (const c of campos) {
+      const claves = campos.flatMap((c) => c.t === "tarifas"
+        ? ["tarifa_hora", "tarifa_dia", "tarifa_m3"].map((k) => ({ k, t: "dinero" })) : [c]);
+      for (const c of claves) {
         if (c.k === "motivo") continue;
         const antes = e[c.k] ?? (c.t === "numero" || c.t === "dinero" ? 0 : "");
         let ahora = d[c.k];
