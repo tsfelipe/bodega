@@ -1561,21 +1561,59 @@ async function generarPdf(doc) {
   pdf.setDrawColor(...azul); pdf.line(M + W - 70, y - 3, M + W, y - 3); y += 1.5;
   fila("TOTAL", pesos(doc.total), true);
   pdf.setFontSize(9); pdf.setFont("helvetica", "normal");
-  const parrafo = (titulo, texto, gris) => {
+  // grande = las notas que escribe la bodega (observaciones y texto al pie): 11 pt en negrilla
+  const parrafo = (titulo, texto, gris, grande) => {
     if (!texto) return;
-    if (titulo) { pdf.setFont("helvetica", "bold"); pdf.text(titulo, M, y); y += 4.5; pdf.setFont("helvetica", "normal"); }
+    const tam = grande ? 11 : 9, alto = grande ? 5.2 : 4.2;
+    pdf.setFontSize(tam);
+    if (y + alto * 2 > 265) { pdf.addPage(); y = 20; }
+    if (titulo) { pdf.setFont("helvetica", "bold"); pdf.text(titulo, M, y); y += alto + 0.5; }
+    pdf.setFont("helvetica", grande ? "bold" : "normal");
     pdf.setTextColor(gris ? 110 : 30);
     const lineas = pdf.splitTextToSize(texto, W);
-    pdf.text(lineas, M, y); y += lineas.length * 4.2 + 3; pdf.setTextColor(...azul);
+    pdf.text(lineas, M, y); y += lineas.length * alto + 3; pdf.setTextColor(...azul);
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(9);
   };
   y += 2;
-  parrafo("Observaciones", doc.observaciones);
+  parrafo("Observaciones", doc.observaciones, false, true);
   parrafo("", doc.nota, true);
-  parrafo("", cfg.pie_documentos, true);
-  if (doc.firmas) {
-    y = Math.max(y + 22, 225);
-    pdf.line(M + 5, y, M + 75, y); pdf.line(M + W - 75, y, M + W - 5, y);
-    pdf.text("Entrega (bodega)", M + 40, y + 5, { align: "center" }); pdf.text("Recibe (cliente)", M + W - 40, y + 5, { align: "center" });
+  parrafo("", cfg.pie_documentos, false, true);
+  const hayFirma = doc.firmaEmpresa && (cfg.firma_imagen || cfg.firma_nombre);
+  const hayQr = doc.firmaEmpresa && cfg.qr_imagen;
+  if (hayFirma || hayQr) {
+    // firma a la izquierda y QR de pago a la derecha, en el mismo bloque
+    let ancho = 0, alto = 0;
+    if (cfg.firma_imagen && hayFirma) {
+      const p = pdf.getImageProperties(cfg.firma_imagen);
+      ancho = 60; alto = ancho * p.height / p.width;
+      if (alto > 26) { alto = 26; ancho = alto * p.width / p.height; }
+    }
+    const QR = 46, altoBloque = Math.max(hayFirma ? Math.max(alto, 12) + 15 : 0, hayQr ? QR + 12 : 0);
+    if (y + altoBloque + 8 > 270) { pdf.addPage(); y = 20; }
+    y += 6;
+    if (hayQr) {
+      const qx = M + W - QR - 8;
+      pdf.addImage(cfg.qr_imagen, "PNG", qx, y, QR, QR);
+      pdf.setFont("helvetica", "bold"); pdf.setFontSize(9.5); pdf.setTextColor(...azul);
+      pdf.text("Pague aquí con QR", qx + QR / 2, y + QR + 4.5, { align: "center" });
+      if (cfg.qr_texto) {
+        pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5);
+        pdf.text(pdf.splitTextToSize(cfg.qr_texto, QR + 16), qx + QR / 2, y + QR + 8.5, { align: "center" });
+      }
+    }
+    if (hayFirma) {
+      const nombre = cfg.firma_nombre || cfg.empresa_nombre || "";
+      const cx = M + 40;                                 // centro del bloque de la firma
+      let fy = y + Math.max(0, (hayQr ? QR - Math.max(alto, 12) - 1 : 0));   // la línea de firma alineada con la base del QR
+      if (cfg.firma_imagen) pdf.addImage(cfg.firma_imagen, "PNG", cx - ancho / 2, fy, ancho, alto);
+      fy += Math.max(alto, 12) + 1;
+      pdf.setDrawColor(...azul); pdf.line(M + 5, fy, M + 75, fy);
+      pdf.setFont("helvetica", "bold"); pdf.setFontSize(10); pdf.setTextColor(...azul);
+      pdf.text(pdf.splitTextToSize(nombre, 80), cx, fy + 5, { align: "center" });
+      pdf.setFont("helvetica", "normal"); pdf.setFontSize(8.5); pdf.setTextColor(110);
+      pdf.text([cfg.empresa_nit ? `NIT: ${cfg.empresa_nit}` : "", "Firma autorizada"].filter(Boolean).join("   "), cx, fy + 9.5, { align: "center" });
+      pdf.setTextColor(...azul);
+    }
   }
   pdf.save(`${doc.numero}.pdf`);
 }
@@ -1613,7 +1651,7 @@ async function pdfFactura(id) {
     titulo: "FACTURA", numero: f.numero, fecha: f.fecha,
     extra: [["Alquiler", d.alquiler], ["Pagada", f.pagada_el ? `${f.pagada_el} ${f.medio_pago || ""}`.trim() : ""]],
     cliente: d.cliente, items: d.items, subtotal: f.subtotal, iva_pct: f.iva_pct, iva: f.iva, total: f.total,
-    observaciones: f.observaciones, anulado: f.estado === "anulada",
+    observaciones: f.observaciones, anulado: f.estado === "anulada", firmaEmpresa: true,
     nota: "Documento interno de control. No es factura electrónica de venta ante la DIAN.",
   });
 }
@@ -1751,19 +1789,62 @@ PAGINAS.config = {
         <div class="error-campo oculto" role="alert"></div>
         <h2>Empresa</h2><p class="ayuda">Sale en el encabezado de cotizaciones, remisiones y facturas.</p>
         ${campo("empresa_nombre", "Nombre")}${campo("empresa_nit", "NIT")}${campo("empresa_direccion", "Dirección")}${campo("empresa_telefono", "Teléfono")}
-        <div class="campo"><label for="cf-pie_documentos">Texto al pie de los documentos</label><textarea id="cf-pie_documentos">${h(c.pie_documentos || "")}</textarea></div>
+        <div class="campo"><label for="cf-pie_documentos">Texto al pie de los documentos</label><textarea id="cf-pie_documentos">${h(c.pie_documentos || "")}</textarea>
+          <div class="nota">Sale grande y en negrilla. Por ejemplo, la cuenta donde deben consignar.</div></div>
+        <h2>Firma de las facturas</h2><p class="ayuda">Sale al final de cada factura, con la línea y el nombre debajo.</p>
+        ${campo("firma_nombre", "Nombre de quien firma", "Si lo deja vacío, sale el nombre de la empresa.")}
+        <div class="campo"><label>Firma</label>
+          <div class="firma-caja"><img id="cf-firma-ver" alt="Firma cargada" class="${c.firma_imagen ? "" : "oculto"}" src="${h(c.firma_imagen || "")}">
+            <span id="cf-firma-vacia" class="${c.firma_imagen ? "oculto" : ""}">Todavía no hay firma.</span></div>
+          <div class="grupo-botones"><label class="btn claro" for="cf-firma-archivo">Cargar foto de la firma</label>
+            <input id="cf-firma-archivo" type="file" accept="image/*" class="oculto">
+            <button class="btn claro" type="button" id="cf-firma-quitar">Quitar firma</button></div>
+          <div class="nota">Firme en una hoja blanca con lapicero negro y tómele una foto de cerca. El fondo blanco se quita solo.</div></div>
+        <h2>QR de pago</h2><p class="ayuda">Sale en cada factura, al lado de la firma, para que el cliente pague escaneándolo.</p>
+        <div class="campo"><label>Código QR</label>
+          <div class="firma-caja"><img id="cf-qr-ver" alt="QR de pago cargado" class="${c.qr_imagen ? "" : "oculto"}" src="${h(c.qr_imagen || "")}">
+            <span id="cf-qr-vacio" class="${c.qr_imagen ? "oculto" : ""}">Todavía no hay QR.</span></div>
+          <div class="grupo-botones"><label class="btn claro" for="cf-qr-archivo">Cargar imagen del QR</label>
+            <input id="cf-qr-archivo" type="file" accept="image/*" class="oculto">
+            <button class="btn claro" type="button" id="cf-qr-quitar">Quitar QR</button></div>
+          <div class="nota">Use una imagen donde se vea solo el cuadro del QR, sin el resto de la pantalla del banco.</div></div>
+        ${campo("qr_texto", "Texto debajo del QR", "Por ejemplo: Bre-B Bancolombia, llave 98656208.")}
         <h2>Cobros</h2>
         <div class="dos">${campo("iva_pct", "IVA (%)", "Ponga 0 si no cobra IVA.")}${campo("validez_dias", "Días de validez de las cotizaciones")}
         ${campo("gracia_dia_min", "Minutos de gracia por día", "Con 60, si devuelven 40 min después de cumplir el día, no se cobra otro.")}
         ${campo("gracia_hora_min", "Minutos de gracia por hora")}</div>
         <button class="btn" type="submit">Guardar configuración</button>
       </form>`;
+    let firma = c.firma_imagen || "";
+    const verFirma = () => {
+      $("#cf-firma-ver").src = firma; $("#cf-firma-ver").classList.toggle("oculto", !firma);
+      $("#cf-firma-vacia").classList.toggle("oculto", !!firma);
+    };
+    $("#cf-firma-archivo").onchange = async (ev) => {
+      const archivo = ev.target.files[0]; ev.target.value = "";
+      if (!archivo) return;
+      try { firma = await limpiarFirma(archivo); verFirma(); avisar("Firma cargada. Oprima «Guardar configuración»."); }
+      catch (e) { avisar(e.message, true); }
+    };
+    $("#cf-firma-quitar").onclick = () => { firma = ""; verFirma(); };
+    let qr = c.qr_imagen || "";
+    const verQr = () => {
+      $("#cf-qr-ver").src = qr; $("#cf-qr-ver").classList.toggle("oculto", !qr);
+      $("#cf-qr-vacio").classList.toggle("oculto", !!qr);
+    };
+    $("#cf-qr-archivo").onchange = async (ev) => {
+      const archivo = ev.target.files[0]; ev.target.value = "";
+      if (!archivo) return;
+      try { qr = await imagenPng(archivo, 600); verQr(); avisar("QR cargado. Oprima «Guardar configuración»."); }
+      catch (e) { avisar(e.message, true); }
+    };
+    $("#cf-qr-quitar").onclick = () => { qr = ""; verQr(); };
     $("#f-config").onsubmit = async (ev) => {
       ev.preventDefault();
       const err = $("#f-config .error-campo");
       err.classList.add("oculto");
-      const datos = {};
-      ["empresa_nombre", "empresa_nit", "empresa_direccion", "empresa_telefono", "pie_documentos", "iva_pct", "validez_dias", "gracia_dia_min", "gracia_hora_min"]
+      const datos = { firma_imagen: firma, qr_imagen: qr };
+      ["empresa_nombre", "empresa_nit", "empresa_direccion", "empresa_telefono", "pie_documentos", "iva_pct", "validez_dias", "gracia_dia_min", "gracia_hora_min", "firma_nombre", "qr_texto"]
         .forEach((k) => { datos[k] = $("#cf-" + k).value.trim(); });
       try {
         await api("bod_config_guardar", { p_datos: datos });
@@ -1774,6 +1855,59 @@ PAGINAS.config = {
     };
   },
 };
+
+/* Imagen → PNG de máximo «lado» píxeles, sin suavizar (para que el QR siga leyéndose). */
+function imagenPng(archivo, lado) {
+  return new Promise((resolver, rechazar) => {
+    const img = new Image();
+    img.onerror = () => rechazar(new Error("No se pudo abrir la imagen. Use una imagen JPG o PNG."));
+    img.onload = () => {
+      const esc = Math.min(1, lado / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * esc); cv.height = Math.round(img.height * esc);
+      const cx = cv.getContext("2d");
+      cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height);
+      cx.drawImage(img, 0, 0, cv.width, cv.height);
+      resolver(cv.toDataURL("image/png"));
+    };
+    img.src = URL.createObjectURL(archivo);
+  });
+}
+
+/* Foto de la firma → PNG con fondo transparente, recortado a la tinta y de tamaño pequeño. */
+function limpiarFirma(archivo) {
+  return new Promise((resolver, rechazar) => {
+    const img = new Image();
+    img.onerror = () => rechazar(new Error("No se pudo abrir la imagen. Use una foto JPG o PNG."));
+    img.onload = () => {
+      const esc = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const w = Math.round(img.width * esc), hh = Math.round(img.height * esc);
+      const cv = document.createElement("canvas"); cv.width = w; cv.height = hh;
+      const cx = cv.getContext("2d"); cx.drawImage(img, 0, 0, w, hh);
+      const d = cx.getImageData(0, 0, w, hh), px = d.data;
+      // umbral según el brillo del papel (el promedio de la imagen)
+      let suma = 0;
+      for (let i = 0; i < px.length; i += 4) suma += (px[i] + px[i + 1] + px[i + 2]) / 3;
+      const papel = suma / (px.length / 4), corte = papel * 0.72;
+      let x0 = w, y0 = hh, x1 = -1, y1 = -1;
+      for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4, luz = (px[i] + px[i + 1] + px[i + 2]) / 3;
+        if (luz > corte || px[i + 3] < 30) { px[i + 3] = 0; continue; }
+        const fuerza = Math.min(1, (corte - luz) / (corte * 0.5));  // borde suave
+        px[i] = px[i + 1] = 20; px[i + 2] = 40; px[i + 3] = Math.round(255 * Math.max(0.35, fuerza));
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      if (x1 < 0) return rechazar(new Error("No se encontró la firma en la imagen. Tome la foto sobre hoja blanca."));
+      cx.putImageData(d, 0, 0);
+      const m = 6; x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(w - 1, x1 + m); y1 = Math.min(hh - 1, y1 + m);
+      const ew = x1 - x0 + 1, eh = y1 - y0 + 1, red = Math.min(1, 600 / ew);
+      const sal = document.createElement("canvas"); sal.width = Math.round(ew * red); sal.height = Math.round(eh * red);
+      sal.getContext("2d").drawImage(cv, x0, y0, ew, eh, 0, 0, sal.width, sal.height);
+      resolver(sal.toDataURL("image/png"));
+    };
+    img.src = URL.createObjectURL(archivo);
+  });
+}
 
 // ============================================================ Más (celular)
 PAGINAS.mas = {
