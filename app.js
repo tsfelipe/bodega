@@ -1784,7 +1784,9 @@ PAGINAS.config = {
     const c = E.config;
     const campo = (k, e, nota = "", tipo = "text") => `<div class="campo"><label for="cf-${k}">${e}</label>
       <input id="cf-${k}" type="${tipo}" value="${h(c[k] || "")}">${nota ? `<div class="nota">${nota}</div>` : ""}</div>`;
+    const sinSql = !("qr_imagen" in c);   // Supabase todavía no tiene la versión con firma y QR
     raiz.innerHTML = `<h1>Configuración</h1>
+      ${sinSql ? '<div class="error-campo" role="alert">Falta actualizar la base de datos: en Supabase abra SQL Editor, pegue todo el archivo instalar.sql nuevo y oprima Run. Sin eso no se guardan la firma ni el QR.</div>' : ""}
       <form id="f-config" style="max-width:640px">
         <div class="error-campo oculto" role="alert"></div>
         <h2>Empresa</h2><p class="ayuda">Sale en el encabezado de cotizaciones, remisiones y facturas.</p>
@@ -1850,8 +1852,13 @@ PAGINAS.config = {
         await api("bod_config_guardar", { p_datos: datos });
         await cargarYo();
         $(".marca").firstChild.textContent = E.config.empresa_nombre || "Bodega";
+        const falta = (firma && !E.config.firma_imagen) || (qr && !E.config.qr_imagen);
+        if (falta) throw new Error("La base de datos no guardó la firma o el QR. Corra el instalar.sql nuevo en Supabase y vuelva a guardar.");
         avisar("Configuración guardada.");
-      } catch (e) { err.textContent = e.message; err.classList.remove("oculto"); }
+      } catch (e) {
+        err.textContent = "No se guardó: " + e.message; err.classList.remove("oculto");
+        err.scrollIntoView({ block: "center" }); avisar("No se guardó la configuración. Lea el mensaje en rojo.", true);
+      }
     };
   },
 };
