@@ -438,7 +438,7 @@ PAGINAS.inventario = {
       return;
     }
     $("#lista").innerHTML = `<table class="tabla"><thead><tr><th>Estado</th><th>Equipo</th><th>¿Dónde está?</th>
-      <th class="num">En bodega</th><th class="num">Afuera</th><th class="num">Por hora</th><th class="num">Por día</th></tr></thead><tbody>
+      <th class="num">En bodega</th><th class="num">Afuera</th><th class="num">Por hora</th><th class="num">Por día</th><th class="num">Por m³</th></tr></thead><tbody>
       ${filas.map((e) => `<tr data-id="${e.id}">
         <td class="sin-titulo">${chip(SEM_EQUIPO[e.semaforo])}</td>
         <td data-t="Equipo"><span><span class="principal">${h(e.nombre)}</span><br><span class="sec">${h(e.codigo)}${e.categoria ? ", " + h(e.categoria) : ""}</span></span></td>
@@ -446,7 +446,8 @@ PAGINAS.inventario = {
         <td data-t="En bodega" class="num">${e.disponible}${e.control === "cantidad" ? ` de ${e.cantidad_total}` : ""}</td>
         <td data-t="Afuera" class="num">${e.alquilado}</td>
         <td data-t="Por hora" class="num">${e.tarifa_hora ? pesos(e.tarifa_hora) : "—"}</td>
-        <td data-t="Por día" class="num">${e.tarifa_dia ? pesos(e.tarifa_dia) : "—"}</td></tr>`).join("")}</tbody></table>`;
+        <td data-t="Por día" class="num">${e.tarifa_dia ? pesos(e.tarifa_dia) : "—"}</td>
+        <td data-t="Por m³" class="num">${e.tarifa_m3 ? pesos(e.tarifa_m3) : "—"}</td></tr>`).join("")}</tbody></table>`;
     document.querySelectorAll("#lista tbody tr").forEach((tr) => {
       tr.onclick = () => fichaEquipo(E.datos.equipos.find((e) => e.id === Number(tr.dataset.id)));
     });
@@ -479,6 +480,7 @@ async function fichaEquipo(e) {
         <dt>En bodega</dt><dd>${e.disponible} de ${e.cantidad_total}</dd>
         <dt>Por hora</dt><dd>${e.tarifa_hora ? pesos(e.tarifa_hora) : "Sin tarifa"}</dd>
         <dt>Por día</dt><dd>${e.tarifa_dia ? pesos(e.tarifa_dia) : "Sin tarifa"}</dd>
+        <dt>Por m³</dt><dd>${e.tarifa_m3 ? pesos(e.tarifa_m3) : "Sin tarifa"}</dd>
         <dt>Ingresó</dt><dd>${h(e.fecha_ingreso)}</dd>
         ${e.fecha_baja ? `<dt>De baja desde</dt><dd>${h(e.fecha_baja)}</dd>` : ""}
         ${e.notas ? `<dt>Notas</dt><dd>${h(e.notas)}</dd>` : ""}
@@ -544,6 +546,8 @@ function formEquipo(e = null, copia = null) {
   campos.push({ k: "serial", e: "Serial o placa", v: e?.serial },
     { k: "tarifa_hora", e: "Valor por hora", t: "dinero", v: base?.tarifa_hora ?? 0 },
     { k: "tarifa_dia", e: "Valor por día", t: "dinero", v: base?.tarifa_dia ?? 0 },
+    { k: "tarifa_m3", e: "Valor por metro cúbico (m³)", t: "dinero", v: base?.tarifa_m3 ?? 0,
+      nota: "Para lo que se cobra por concreto producido, como la hormigonera. Deje 0 si no aplica." },
     { k: "notas", e: "Notas", t: "nota", v: e?.notas });
   formulario({
     titulo: copia ? `Otra máquina igual a ${h(copia.nombre)}` : nuevo ? "Nuevo equipo" : `Editar ${h(e.nombre)}`, campos,
@@ -598,6 +602,7 @@ function formEquipoTotal(e) {
       nota: "Si una máquina se registró por unidad y en realidad hay varias iguales, pásela a «por cantidad»." },
     { k: "cantidad_total", e: "Cantidad total", t: "numero", v: e.cantidad_total, nota: `Ahora hay ${e.alquilado} afuera; no puede quedar por debajo de eso.` },
     { k: "tarifa_hora", e: "Valor por hora", t: "dinero", v: e.tarifa_hora }, { k: "tarifa_dia", e: "Valor por día", t: "dinero", v: e.tarifa_dia },
+    { k: "tarifa_m3", e: "Valor por m³", t: "dinero", v: e.tarifa_m3 },
     { k: "estado", e: "Estado", t: "select", v: e.estado, op: [["activo", "Activo"], ["baja", "De baja"]] },
     { k: "fecha_ingreso", e: "Fecha de ingreso", t: "fecha", v: e.fecha_ingreso },
     { k: "fecha_baja", e: "Fecha de baja", t: "fecha", v: e.fecha_baja },
@@ -823,8 +828,11 @@ function confirmar(titulo, mensaje, textoSi = "Sí", clase = "") {
   });
 }
 
-const UNIDAD = { hora: "hora", dia: "día" };
-const unidades = (t, m) => `${num(t)} ${UNIDAD[m]}${Number(t) === 1 ? "" : "s"}`;
+const UNIDAD = { hora: "hora", dia: "día", m3: "m³" };
+const unidades = (t, m) => (m === "m3" ? `${num(t)} m³` : `${num(t)} ${UNIDAD[m]}${Number(t) === 1 ? "" : "s"}`);
+// igual que en Supabase: por tiempo = cantidad × tiempo × tarifa; por m³ = m³ usados × tarifa
+const valorLinea = (cantidad, modalidad, tiempo, tarifa) => Math.round((modalidad === "m3" ? 1 : cantidad) * (Number(tiempo) || 0) * tarifa);
+const tarifaDe = (e, m) => e[{ hora: "tarifa_hora", dia: "tarifa_dia", m3: "tarifa_m3" }[m]] || 0;
 const aFecha = (s) => new Date(String(s).replace(" ", "T"));
 
 // lo mismo que calcula Supabase: lo que pase de una unidad completa cuenta como otra, salvo la gracia
@@ -877,8 +885,8 @@ async function abrirDocumento(tipo, alquiler = null) {
       <div class="agregar-renglon">
         <div class="ancho"><label for="d-equipo">Equipo</label><select id="d-equipo"></select></div>
         <div><label for="d-cant">Cantidad</label><input id="d-cant" type="number" min="1" value="1" inputmode="numeric"></div>
-        <div><label for="d-mod">Cobro</label><select id="d-mod"><option value="dia">Por día</option><option value="hora">Por hora</option></select></div>
-        <div><label for="d-tiempo">${tipo === "cotizacion" ? "Tiempo" : "Tiempo estimado"}</label><input id="d-tiempo" type="number" min="0.5" step="0.5" value="1" inputmode="decimal"></div>
+        <div><label for="d-mod">Cobro</label><select id="d-mod"><option value="dia">Por día</option><option value="hora">Por hora</option><option value="m3">Por m³</option></select></div>
+        <div><label for="d-tiempo" id="d-tiempo-l">${tipo === "cotizacion" ? "Tiempo" : "Tiempo estimado"}</label><input id="d-tiempo" type="number" min="0.5" step="0.5" value="1" inputmode="decimal"></div>
         <div><label for="d-tarifa">Tarifa</label><input id="d-tarifa" type="number" min="0" step="1000" inputmode="numeric" ${puede("precios") ? "" : "disabled"}></div>
         <div><button class="btn" type="button" id="d-agregar">Agregar</button></div>
       </div>
@@ -895,10 +903,14 @@ async function abrirDocumento(tipo, alquiler = null) {
   $("#d-equipo", v).innerHTML = activos.map((e) => `<option value="${e.id}">${h(e.codigo)}: ${h(e.nombre)} (hay ${e.disponible})</option>`).join("")
     || '<option value="">No hay equipos activos</option>';
   const equipoSel = () => activos.find((e) => e.id === Number($("#d-equipo", v).value));
-  const sugerirTarifa = () => { const e = equipoSel(); if (e) $("#d-tarifa", v).value = e["tarifa_" + $("#d-mod", v).value] || ""; };
+  const sugerirTarifa = () => {
+    const e = equipoSel(), m = $("#d-mod", v).value;
+    if (e) $("#d-tarifa", v).value = tarifaDe(e, m) || "";
+    $("#d-tiempo-l", v).textContent = m === "m3" ? "m³ estimados" : tipo === "cotizacion" ? "Tiempo" : "Tiempo estimado";
+  };
   $("#d-equipo", v).onchange = () => {
     const e = equipoSel();
-    if (e) $("#d-mod", v).value = !e.tarifa_dia && e.tarifa_hora ? "hora" : "dia";
+    if (e) $("#d-mod", v).value = e.tarifa_dia ? "dia" : e.tarifa_hora ? "hora" : e.tarifa_m3 ? "m3" : "dia";
     $("#d-cant", v).value = 1;
     sugerirTarifa();
   };
@@ -907,9 +919,9 @@ async function abrirDocumento(tipo, alquiler = null) {
   const pintarItems = () => {
     let sub = 0;
     $("#d-items", v).innerHTML = items.map((i, n) => {
-      const st = Math.round(i.cantidad * i.tiempo * i.tarifa);
+      const st = valorLinea(i.cantidad, i.modalidad, i.tiempo, i.tarifa);
       sub += st;
-      return `<tr><td>${h(i.nombre)}</td><td class="num">${i.cantidad}</td><td>${UNIDAD[i.modalidad]}</td><td class="num">${num(i.tiempo)}</td>
+      return `<tr><td>${h(i.nombre)}</td><td class="num">${i.cantidad}</td><td>${UNIDAD[i.modalidad]}</td><td class="num">${unidades(i.tiempo, i.modalidad)}</td>
         <td class="num">${pesos(i.tarifa)}</td><td class="num">${pesos(st)}</td><td><button class="quitar" data-n="${n}" aria-label="Quitar">×</button></td></tr>`;
     }).join("") || '<tr><td colspan="7" style="color:var(--suave)">Agregue los equipos uno por uno.</td></tr>';
     v.querySelectorAll(".quitar").forEach((b) => { b.onclick = () => { items.splice(Number(b.dataset.n), 1); pintarItems(); }; });
@@ -1028,7 +1040,7 @@ function pintarAlquiler(v, d) {
     return `<tr data-item="${i.id}" style="cursor:pointer"><td>${chip(estado)}</td>
       <td><b>${h(i.nombre)}</b><br><span class="sec" style="color:var(--suave)">${h(i.codigo)}, salió ${h(i.fecha_salida)}</span></td>
       <td class="num">${i.cantidad}</td><td>${UNIDAD[i.modalidad]}</td><td class="num">${pesos(i.tarifa)}</td>
-      <td>${dev ? h(dev) : ""}</td><td class="num">${dev ? num(i.tiempo_cobrado) : ""}</td><td class="num">${dev ? pesos(i.subtotal) : ""}</td>
+      <td>${dev ? h(dev) : ""}</td><td class="num">${dev ? unidades(i.tiempo_cobrado, i.modalidad) : ""}</td><td class="num">${dev ? pesos(i.subtotal) : ""}</td>
       <td>${i.danadas ? `${i.danadas} und.${i.cargo_dano ? ", " + pesos(i.cargo_dano) : ""}` : ""}</td><td>${h(i.factura || "")}</td></tr>`;
   }).join("");
   const fuera = d.items.some((i) => !i.fecha_devolucion);
@@ -1144,14 +1156,14 @@ function menuRenglon(vAlq, a, i, ahora) {
         if (k === "total") {
           formTotal("alquiler_items", i.id, `Edición total: ${h(i.nombre)}`, [
             { k: "cantidad", e: "Cantidad", t: "numero", v: i.cantidad, min: 1 },
-            { k: "modalidad", e: "Cobro", t: "select", v: i.modalidad, op: [["dia", "Por día"], ["hora", "Por hora"]] },
+            { k: "modalidad", e: "Cobro", t: "select", v: i.modalidad, op: [["dia", "Por día"], ["hora", "Por hora"], ["m3", "Por m³"]] },
             { k: "tarifa", e: "Tarifa", t: "dinero", v: i.tarifa },
             { k: "fecha_salida", e: "Salió", t: "fecha", v: i.fecha_salida },
             { k: "fecha_devolucion", e: "Devuelto", t: "fecha", v: i.fecha_devolucion, nota: "Vacío = sigue con el cliente." },
-            { k: "tiempo_cobrado", e: "Tiempo cobrado", t: "numero", v: i.tiempo_cobrado, paso: 0.25 },
+            { k: "tiempo_cobrado", e: "Tiempo cobrado (o m³ si se cobra por m³)", t: "numero", v: i.tiempo_cobrado, paso: 0.25 },
             { k: "danadas", e: "Unidades dañadas", t: "numero", v: i.danadas },
             { k: "cargo_dano", e: "Cargo por daño", t: "dinero", v: i.cargo_dano },
-          ], i, "El subtotal se recalcula solo con cantidad × tiempo × tarifa.");
+          ], i, "El subtotal se recalcula solo (por m³: m³ × tarifa).");
         }
       } catch (e) { avisar(e.message, true); }
     };
@@ -1172,12 +1184,13 @@ function dialogoDevolucion(i, modo, ahora) {
         ${modo === "devolver" && i.cantidad > 1 ? `<div class="campo"><label for="r-cant">Cantidad que recibe (de ${i.cantidad})</label><input id="r-cant" type="number" min="1" max="${i.cantidad}" value="${i.cantidad}"></div>` : ""}
         <div class="campo"><label for="r-fecha">${modo === "corte" ? "Cobrar hasta" : "Fecha y hora de devolución"}</label>
           <input id="r-fecha" type="datetime-local" value="${aInput(dev ? i.fecha_devolucion : ahoraLocal())}" ${modo === "corregir" && i.es_corte ? "disabled" : ""}></div>
-        <div class="campo"><label for="r-mod">Cobrar</label><select id="r-mod" ${libre ? "" : "disabled"}><option value="dia">Por día</option><option value="hora">Por hora</option></select></div>
+        <div class="campo"><label for="r-mod">Cobrar</label><select id="r-mod" ${libre ? "" : "disabled"}><option value="dia">Por día</option><option value="hora">Por hora</option><option value="m3">Por m³</option></select></div>
         <div class="campo"><label for="r-tarifa">Tarifa</label><input id="r-tarifa" type="number" min="0" step="1000" value="${i.tarifa}" ${libre ? "" : "disabled"}></div>
       </div>
-      <label class="check"><input type="checkbox" id="r-auto" ${dev ? "" : "checked"} ${libre ? "" : "disabled"}> Calcular el tiempo con las fechas</label>
-      <div class="campo" style="margin-top:8px"><label for="r-tiempo">Tiempo a cobrar</label><input id="r-tiempo" type="number" min="0.25" step="0.5" value="${i.tiempo_cobrado || 1}"></div>
-      ${!libre ? '<p class="ayuda">Su usuario cobra lo pactado: el tiempo sale de las fechas.</p>' : ""}
+      <label class="check" id="r-auto-l"><input type="checkbox" id="r-auto" ${dev ? "" : "checked"} ${libre ? "" : "disabled"}> Calcular el tiempo con las fechas</label>
+      <div class="campo" style="margin-top:8px"><label for="r-tiempo" id="r-tiempo-l">Tiempo a cobrar</label>
+        <input id="r-tiempo" type="number" min="0.25" step="0.5" inputmode="decimal" value="${dev ? i.tiempo_cobrado : i.modalidad === "m3" ? "" : 1}"></div>
+      ${!libre ? '<p class="ayuda" id="r-pactado">Su usuario cobra lo pactado: el tiempo sale de las fechas.</p>' : ""}
       ${modo === "devolver" ? `<h2>¿Vino algo dañado o se perdió?</h2><div class="dos">
         <div class="campo"><label for="r-danadas">Unidades dañadas o perdidas</label><input id="r-danadas" type="number" min="0" max="${i.cantidad}" value="0"></div>
         <div class="campo"><label for="r-cargo">Cobrar al cliente por el daño</label><input id="r-cargo" type="number" min="0" step="10000" value="0"></div></div>
@@ -1188,18 +1201,23 @@ function dialogoDevolucion(i, modo, ahora) {
   });
   const el = (id) => $("#" + id, v);
   el("r-mod").value = i.modalidad;
-  const equipo = { hora: i.tarifa_hora_equipo, dia: i.tarifa_dia_equipo };
+  const equipo = { hora: i.tarifa_hora_equipo, dia: i.tarifa_dia_equipo, m3: i.tarifa_m3_equipo };
   el("r-mod").onchange = () => { el("r-tarifa").value = el("r-mod").value === i.modalidad ? i.tarifa : equipo[el("r-mod").value] || 0; calcular(); };
   const calcular = () => {
     const mod = el("r-mod").value, fecha = deInput(el("r-fecha").value);
-    const auto = el("r-auto").checked;
-    el("r-tiempo").disabled = auto || !libre;
+    const m3 = mod === "m3";   // por m³ no hay tiempo que calcular: se escriben los metros usados (cualquiera puede)
+    el("r-auto-l").classList.toggle("oculto", m3);
+    if (el("r-pactado")) el("r-pactado").classList.toggle("oculto", m3);
+    el("r-tiempo-l").textContent = m3 ? "Metros cúbicos (m³) usados" : "Tiempo a cobrar";
+    const auto = el("r-auto").checked && !m3;
+    el("r-tiempo").disabled = !m3 && (auto || !libre);
     if (auto) { const t = calcularTiempo(mod, i.fecha_salida, fecha); if (t) el("r-tiempo").value = t; }
     const cant = el("r-cant") ? Number(el("r-cant").value) : i.cantidad;
     const t = Number(el("r-tiempo").value), tarifa = Number(el("r-tarifa").value);
     const cargo = el("r-cargo") ? Number(el("r-cargo").value) : 0;
     el("r-calculo").innerHTML = !(tarifa > 0) ? `Este equipo no tiene tarifa por ${UNIDAD[mod]}: escriba el valor.`
-      : `A cobrar: ${cant} × ${unidades(t, mod)} × ${pesos(tarifa)} = ${pesos(cant * t * tarifa)}${cargo ? ` + daño ${pesos(cargo)}` : ""}
+      : mod === "m3" && !(t > 0) ? "Escriba cuántos metros cúbicos se usaron."
+      : `A cobrar: ${mod === "m3" ? "" : cant + " × "}${unidades(t, mod)} × ${pesos(tarifa)} = ${pesos(valorLinea(cant, mod, t, tarifa))}${cargo ? ` + daño ${pesos(cargo)}` : ""}
          <small>Tiempo real fuera de bodega: ${duracion(i.fecha_salida, fecha)}</small>`;
   };
   v.querySelectorAll("input, select").forEach((x) => { x.addEventListener("input", calcular); x.addEventListener("change", calcular); });
@@ -1210,7 +1228,8 @@ function dialogoDevolucion(i, modo, ahora) {
     err.classList.add("oculto");
     const comunes = {
       p_item: i.id, p_fecha: deInput(el("r-fecha").value), p_modalidad: el("r-mod").value, p_tarifa: Number(el("r-tarifa").value),
-      p_tiempo: el("r-auto").checked ? null : Number(el("r-tiempo").value),
+      p_tiempo: el("r-mod").value === "m3" ? (el("r-tiempo").value === "" ? null : Number(el("r-tiempo").value))
+        : el("r-auto").checked ? null : Number(el("r-tiempo").value),
     };
     try {
       if (modo === "corregir") {
@@ -1288,7 +1307,7 @@ async function fichaCotizacion(id) {
     titulo: `${h(c.numero)}: ${h(d.cliente.nombre)}`, ancha: true,
     cuerpo: `${chip(sem)} <span style="margin-left:8px;color:var(--suave)">Hecha ${h(c.fecha)}, válida hasta ${h(c.valida_hasta)}</span>
       <table class="renglones"><thead><tr><th>Equipo</th><th class="num">Cant.</th><th>Cobro</th><th class="num">Tiempo</th><th class="num">Tarifa</th><th class="num">Subtotal</th></tr></thead><tbody>
-      ${d.items.map((i) => `<tr><td>${h(i.descripcion)}</td><td class="num">${i.cantidad}</td><td>${UNIDAD[i.modalidad]}</td><td class="num">${num(i.tiempo)}</td>
+      ${d.items.map((i) => `<tr><td>${h(i.descripcion)}</td><td class="num">${i.cantidad}</td><td>${UNIDAD[i.modalidad]}</td><td class="num">${unidades(i.tiempo, i.modalidad)}</td>
         <td class="num">${pesos(i.tarifa)}</td><td class="num">${pesos(i.subtotal)}</td></tr>`).join("")}</tbody></table>
       <p class="totales">Subtotal ${pesos(c.subtotal)}<span>IVA ${pesos(c.iva)}</span><span>Total ${pesos(c.total)}</span></p>
       ${c.observaciones ? `<p style="white-space:pre-line">${h(c.observaciones)}</p>` : ""}
@@ -1448,8 +1467,10 @@ async function generarPdf(doc) {
   pdf.text(String(cl.telefono || ""), M + W / 2 + 19, y + 5.5); pdf.text(String(cl.direccion || "").slice(0, 60), M + W / 2 + 19, y + 10.5);
   pdf.autoTable({
     startY: y + 18, margin: { left: M, right: M }, theme: "plain",
-    head: [["Descripción", "Cant.", "Cobro por", doc.etiquetaTiempo || "Tiempo", "Tarifa", "Subtotal"]],
-    body: doc.items.map((i) => [i.descripcion, i.cantidad, i.unidad || "", i.unidad ? num(i.tiempo) : "", i.tarifa ? pesos(i.tarifa) : "", pesos(i.subtotal)]),
+    // la fuente del PDF no trae el «³»: se escribe m3
+    head: [["Descripción", "Cant.", "Cobro por", doc.etiquetaTiempo || "Tiempo o m3", "Tarifa", "Subtotal"]],
+    body: doc.items.map((i) => [i.descripcion, i.cantidad, i.unidad || "", i.unidad ? num(i.tiempo) : "", i.tarifa ? pesos(i.tarifa) : "", pesos(i.subtotal)]
+      .map((x) => String(x).replace(/³/g, "3"))),
     headStyles: { fillColor: azul, textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [244, 246, 248] }, styles: { fontSize: 9, cellPadding: 2.2 },
     columnStyles: { 0: { cellWidth: 78 }, 1: { halign: "center" }, 2: { halign: "center" }, 3: { halign: "center" }, 4: { halign: "right" }, 5: { halign: "right" } },
@@ -1497,7 +1518,7 @@ async function pdfRemision(id) {
   const a = d.alquiler;
   const items = d.items.filter((i) => !i.fecha_devolucion && !i.es_corte).map((i) => ({
     descripcion: `${i.nombre} (${i.codigo})\nSale: ${i.fecha_salida}`, cantidad: i.cantidad, unidad: UNIDAD[i.modalidad],
-    tiempo: i.tiempo_estimado, tarifa: i.tarifa, subtotal: Math.round(i.cantidad * i.tiempo_estimado * i.tarifa),
+    tiempo: i.tiempo_estimado, tarifa: i.tarifa, subtotal: valorLinea(i.cantidad, i.modalidad, i.tiempo_estimado, i.tarifa),
   })).concat(d.cargos.filter((x) => !x.factura).map((x) => ({ descripcion: x.concepto, cantidad: 1, unidad: "", tiempo: 1, tarifa: 0, subtotal: x.valor })));
   const t = conIva(items.reduce((s, i) => s + i.subtotal, 0));
   await generarPdf({
