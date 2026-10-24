@@ -910,12 +910,13 @@ function semaforoAlquiler(a, ahora = E.ahora || ahoraLocal()) {
 }
 
 // ======================================================== documento nuevo
-/* tipo: "alquiler" | "cotizacion" | "agregar" (más equipos a un alquiler abierto) */
+/* tipo: "alquiler" | "cotizacion" | "agregar" (más equipos a un alquiler abierto) | "factura" (factura inmediata) */
 async function abrirDocumento(tipo, alquiler = null) {
   const [equipos, clientes] = await Promise.all([api("bod_equipos"), api("bod_clientes")]);
   const items = [];
   const etiquetaCliente = (c) => `${c.nombre} (${c.tipo_doc} ${c.documento})`;
-  const titulo = { alquiler: "Nuevo alquiler", cotizacion: "Nueva cotización", agregar: `Agregar equipos a ${h(alquiler?.numero)}` }[tipo];
+  const titulo = { alquiler: "Nuevo alquiler", cotizacion: "Nueva cotización", agregar: `Agregar equipos a ${h(alquiler?.numero)}`, factura: "Nueva factura" }[tipo];
+  const esFactura = tipo === "factura";
   const v = abrirVentana({
     titulo, ancha: true,
     cuerpo: `<div class="error-campo oculto" role="alert"></div>
@@ -924,34 +925,48 @@ async function abrirDocumento(tipo, alquiler = null) {
         <div style="display:flex;gap:8px"><input id="d-cliente" type="text" list="d-clientes" placeholder="Escriba el nombre o el documento" autocomplete="off">
         ${puede("clientes") ? '<button class="btn claro" type="button" id="d-cli-nuevo">Cliente nuevo</button>' : ""}</div>
         <datalist id="d-clientes"></datalist></div>`}
-      ${tipo !== "cotizacion" ? `<div class="dos">
+      ${tipo === "alquiler" || tipo === "agregar" ? `<div class="dos">
         <div class="campo"><label for="d-salida">Sale de bodega</label><input id="d-salida" type="datetime-local" value="${aInput(ahoraLocal())}"></div>
         ${tipo === "alquiler" ? '<div class="campo"><label for="d-prevista">Debe volver</label><input id="d-prevista" type="datetime-local"></div>' : ""}</div>` : ""}
       <div class="agregar-renglon">
-        <div class="ancho"><label for="d-equipo">Equipo</label><select id="d-equipo"></select></div>
+        <div class="ancho"><label for="d-equipo">${esFactura ? "Qué se cobra" : "Equipo"}</label><select id="d-equipo"></select></div>
         <div><label for="d-cant">Cantidad</label><input id="d-cant" type="number" min="1" value="1" inputmode="numeric"></div>
-        <div><label for="d-mod">Cobro</label><select id="d-mod"><option value="dia">Por día</option><option value="hora">Por hora</option><option value="m3">Por m³</option></select></div>
-        <div><label for="d-tiempo" id="d-tiempo-l">${tipo === "cotizacion" ? "Tiempo" : "Tiempo estimado"}</label><input id="d-tiempo" type="number" min="0.5" step="0.5" value="1" inputmode="decimal"></div>
-        <div><label for="d-tarifa">Tarifa</label><input id="d-tarifa" type="number" min="0" step="1000" inputmode="numeric" ${puede("precios") ? "" : "disabled"}></div>
+        <div id="d-mod-c"><label for="d-mod">Cobro</label><select id="d-mod"><option value="dia">Por día</option><option value="hora">Por hora</option><option value="m3">Por m³</option></select></div>
+        <div id="d-tiempo-c"><label for="d-tiempo" id="d-tiempo-l">${tipo === "cotizacion" ? "Tiempo" : "Tiempo estimado"}</label><input id="d-tiempo" type="number" min="0.5" step="0.5" value="1" inputmode="decimal"></div>
+        ${esFactura ? '<div class="oculto concepto" id="d-desc-c"><label for="d-desc">Qué está cobrando</label><input id="d-desc" type="text" placeholder="Ej.: transporte, operario, combustible" autocomplete="off"></div>' : ""}
+        <div><label for="d-tarifa" id="d-tarifa-l">Tarifa</label><input id="d-tarifa" type="number" min="0" step="1000" inputmode="numeric" ${puede("precios") ? "" : "disabled"}></div>
         <div><button class="btn" type="button" id="d-agregar">Agregar</button></div>
       </div>
-      <table class="renglones"><thead><tr><th>Equipo</th><th class="num">Cant.</th><th>Cobro</th><th class="num">Tiempo</th><th class="num">Tarifa</th><th class="num">Subtotal</th><th></th></tr></thead><tbody id="d-items"></tbody></table>
+      <table class="renglones"><thead><tr><th>${esFactura ? "Descripción" : "Equipo"}</th><th class="num">Cant.</th><th>Cobro</th><th class="num">Tiempo</th><th class="num">Tarifa</th><th class="num">Subtotal</th><th></th></tr></thead><tbody id="d-items"></tbody></table>
       <p class="totales" id="d-totales"></p>
-      ${tipo !== "agregar" ? '<div class="campo"><label for="d-obs">Observaciones</label><textarea id="d-obs" placeholder="Obra, dirección de entrega, condiciones…"></textarea></div>' : ""}`,
-    pie: `<button class="btn claro" data-no>Cancelar</button><button class="btn" data-si>${{ alquiler: "Entregar equipos", cotizacion: "Crear cotización", agregar: "Agregar al alquiler" }[tipo]}</button>`,
+      ${tipo !== "agregar" ? '<div class="campo"><label for="d-obs">Observaciones</label><textarea id="d-obs" placeholder="Obra, dirección de entrega, condiciones…"></textarea></div>' : ""}
+      ${esFactura && puede("fac_pago") ? `<div class="pago-contado"><label><input type="checkbox" id="d-pagada"> El cliente ya pagó</label>
+        <select id="d-medio" aria-label="Medio de pago" disabled>${["Efectivo", "Transferencia", "Nequi / Daviplata", "Tarjeta", "Otro"].map((m) => `<option>${m}</option>`).join("")}</select></div>` : ""}`,
+    pie: `<button class="btn claro" data-no>Cancelar</button><button class="btn" data-si>${{ alquiler: "Entregar equipos", cotizacion: "Crear cotización", agregar: "Agregar al alquiler", factura: "Emitir factura" }[tipo]}</button>`,
   });
   const err = $(".error-campo", v);
   const fallo = (m) => { err.textContent = m; err.classList.remove("oculto"); err.scrollIntoView({ block: "nearest" }); };
   const pintarClientes = () => { if ($("#d-clientes", v)) $("#d-clientes", v).innerHTML = clientes.map((c) => `<option value="${h(etiquetaCliente(c))}">`).join(""); };
   pintarClientes();
   const activos = equipos.filter((e) => e.estado === "activo");
-  $("#d-equipo", v).innerHTML = activos.map((e) => `<option value="${e.id}">${h(e.codigo)}: ${h(e.nombre)} (hay ${e.disponible})</option>`).join("")
-    || '<option value="">No hay equipos activos</option>';
+  $("#d-equipo", v).innerHTML = (esFactura ? '<option value="otro">Otro concepto (escribirlo)</option>' : "")
+    + (activos.map((e) => `<option value="${e.id}">${h(e.codigo)}: ${h(e.nombre)}${esFactura ? "" : ` (hay ${e.disponible})`}</option>`).join("")
+    || (esFactura ? "" : '<option value="">No hay equipos activos</option>'));
+  if (esFactura && activos.length) $("#d-equipo", v).value = String(activos[0].id);
   const equipoSel = () => activos.find((e) => e.id === Number($("#d-equipo", v).value));
+  const esOtro = () => esFactura && $("#d-equipo", v).value === "otro";
   const sugerirTarifa = () => {
     const e = equipoSel(), m = $("#d-mod", v).value;
+    if (esFactura) {
+      const otro = esOtro();
+      $("#d-desc-c", v).classList.toggle("oculto", !otro);
+      $("#d-mod-c", v).classList.toggle("oculto", otro); $("#d-tiempo-c", v).classList.toggle("oculto", otro);
+      $("#d-tarifa-l", v).textContent = otro ? "Valor" : "Tarifa";
+      $("#d-tarifa", v).disabled = !otro && !puede("precios");
+      if (otro) { $("#d-tarifa", v).value = ""; return; }
+    }
     if (e) $("#d-tarifa", v).value = tarifaDe(e, m) || "";
-    $("#d-tiempo-l", v).textContent = m === "m3" ? "m³ estimados" : tipo === "cotizacion" ? "Tiempo" : "Tiempo estimado";
+    $("#d-tiempo-l", v).textContent = m === "m3" ? (esFactura ? "m³" : "m³ estimados") : tipo === "cotizacion" || esFactura ? "Tiempo" : "Tiempo estimado";
   };
   $("#d-equipo", v).onchange = () => {
     const e = equipoSel();
@@ -966,16 +981,26 @@ async function abrirDocumento(tipo, alquiler = null) {
     $("#d-items", v).innerHTML = items.map((i, n) => {
       const st = valorLinea(i.cantidad, i.modalidad, i.tiempo, i.tarifa);
       sub += st;
-      return `<tr><td>${h(i.nombre)}</td><td class="num">${i.cantidad}</td><td>${UNIDAD[i.modalidad]}</td><td class="num">${unidades(i.tiempo, i.modalidad)}</td>
+      return `<tr><td>${h(i.nombre)}</td><td class="num">${i.cantidad}</td><td>${UNIDAD[i.modalidad] || ""}</td><td class="num">${i.modalidad ? unidades(i.tiempo, i.modalidad) : ""}</td>
         <td class="num">${pesos(i.tarifa)}</td><td class="num">${pesos(st)}</td><td><button class="quitar" data-n="${n}" aria-label="Quitar">×</button></td></tr>`;
-    }).join("") || '<tr><td colspan="7" style="color:var(--suave)">Agregue los equipos uno por uno.</td></tr>';
+    }).join("") || `<tr><td colspan="7" style="color:var(--suave)">${esFactura ? "Agregue lo que va a cobrar, renglón por renglón." : "Agregue los equipos uno por uno."}</td></tr>`;
     v.querySelectorAll(".quitar").forEach((b) => { b.onclick = () => { items.splice(Number(b.dataset.n), 1); pintarItems(); }; });
     const t = conIva(sub);
-    $("#d-totales", v).innerHTML = `Subtotal ${pesos(t.sub)}<span>IVA ${pesos(t.iva)}</span><span>Total${tipo === "cotizacion" ? "" : " estimado"} ${pesos(t.total)}</span>`;
+    $("#d-totales", v).innerHTML = `Subtotal ${pesos(t.sub)}<span>IVA ${pesos(t.iva)}</span><span>Total${tipo === "cotizacion" || esFactura ? "" : " estimado"} ${pesos(t.total)}</span>`;
   };
   pintarItems();
+  if ($("#d-pagada", v)) $("#d-pagada", v).onchange = (ev) => { $("#d-medio", v).disabled = !ev.target.checked; };
   $("#d-agregar", v).onclick = () => {
     err.classList.add("oculto");
+    if (esOtro()) {
+      const descripcion = $("#d-desc", v).value.trim(), cantidad = Number($("#d-cant", v).value), tarifa = Number($("#d-tarifa", v).value);
+      if (!descripcion) { $("#d-desc", v).focus(); return fallo("Escriba qué está cobrando."); }
+      if (!(cantidad >= 1)) return fallo("Revise la cantidad.");
+      if (!(tarifa > 0)) { $("#d-tarifa", v).focus(); return fallo("Escriba el valor."); }
+      items.push({ equipo_id: null, nombre: descripcion, descripcion, cantidad, modalidad: "", tiempo: 1, tarifa });
+      $("#d-desc", v).value = ""; $("#d-tarifa", v).value = ""; $("#d-cant", v).value = 1;
+      return pintarItems();
+    }
     const e = equipoSel();
     if (!e) return fallo("No hay equipos activos en el inventario.");
     const i = { equipo_id: e.id, nombre: `${e.nombre} (${e.codigo})`, cantidad: Number($("#d-cant", v).value), modalidad: $("#d-mod", v).value,
@@ -983,7 +1008,7 @@ async function abrirDocumento(tipo, alquiler = null) {
     if (!(i.cantidad >= 1) || !(i.tiempo > 0)) return fallo("Revise la cantidad y el tiempo.");
     if (!(i.tarifa > 0)) return fallo(`«${e.nombre}» no tiene tarifa por ${UNIDAD[i.modalidad]}. ${puede("precios") ? "Escríbala." : "Pídale a alguien con permiso de precios que la defina en el inventario."}`);
     const pedido = i.cantidad + items.filter((x) => x.equipo_id === e.id).reduce((s, x) => s + x.cantidad, 0);
-    if (tipo !== "cotizacion" && pedido > e.disponible) return fallo(`Solo hay ${e.disponible} disponible(s) de «${e.nombre}».`);
+    if (tipo !== "cotizacion" && !esFactura && pedido > e.disponible) return fallo(`Solo hay ${e.disponible} disponible(s) de «${e.nombre}».`);
     items.push(i);
     pintarItems();
   };
@@ -1000,12 +1025,17 @@ async function abrirDocumento(tipo, alquiler = null) {
     err.classList.add("oculto");
     const cliente = tipo === "agregar" ? null : clientes.find((c) => etiquetaCliente(c) === $("#d-cliente", v).value.trim());
     if (tipo !== "agregar" && !cliente) return fallo("Elija un cliente de la lista (o regístrelo con «Cliente nuevo»).");
-    if (!items.length) return fallo("Agregue al menos un equipo.");
-    const renglones = items.map(({ equipo_id, cantidad, modalidad, tiempo, tarifa }) => ({ equipo_id, cantidad, modalidad, tiempo, tarifa }));
+    if (!items.length) return fallo(esFactura ? "Agregue al menos un renglón con «Agregar»." : "Agregue al menos un equipo.");
+    const renglones = items.map(({ equipo_id, descripcion, cantidad, modalidad, tiempo, tarifa }) => ({ equipo_id, descripcion, cantidad, modalidad, tiempo, tarifa }));
     const btn = $("[data-si]", v);
     btn.disabled = true;
     try {
-      if (tipo === "cotizacion") {
+      if (esFactura) {
+        const pagada = $("#d-pagada", v)?.checked;
+        const r = await api("bod_factura_directa", { p_cliente: cliente.id, p_items: renglones, p_observaciones: $("#d-obs", v).value,
+          p_medio_pago: pagada ? $("#d-medio", v).value : null });
+        v.cerrar(); avisar(pagada ? "Factura emitida y pagada." : "Factura emitida."); refrescar(); fichaFactura(r.id);
+      } else if (tipo === "cotizacion") {
         const r = await api("bod_cotizacion_crear", { p_cliente: cliente.id, p_items: renglones, p_observaciones: $("#d-obs", v).value });
         v.cerrar(); avisar("Cotización creada."); refrescar(); fichaCotizacion(r.id);
       } else if (tipo === "agregar") {
@@ -1390,8 +1420,10 @@ PAGINAS.facturas = {
     const ui = (E.ui.facturas ||= { buscar: "", porCobrar: false });
     raiz.innerHTML = `<h1>Facturas</h1>
       <div class="barra"><input class="buscar" type="search" id="buscar" placeholder="Buscar por número o cliente" value="${h(ui.buscar)}">
-        <label><input type="checkbox" id="porcobrar" ${ui.porCobrar ? "checked" : ""}> Solo por cobrar</label></div>
-      <p class="ayuda">Las facturas se emiten desde cada alquiler, con «Facturar lo pendiente».</p><div id="lista"></div>`;
+        <label><input type="checkbox" id="porcobrar" ${ui.porCobrar ? "checked" : ""}> Solo por cobrar</label>
+        ${puede("fac_emitir") ? `<button class="btn" id="b-nuevo">${ICONOS.mas} Nueva factura</button>` : ""}</div>
+      <p class="ayuda">«Nueva factura» cobra de una vez, sin cotización ni alquiler, y no mueve el inventario. Lo que salió en un alquiler se factura desde el alquiler, con «Facturar lo pendiente».</p><div id="lista"></div>`;
+    if ($("#b-nuevo")) $("#b-nuevo").onclick = () => abrirDocumento("factura").catch((e) => avisar(e.message, true));
     $("#buscar").oninput = (ev) => { ui.buscar = ev.target.value; this.pintar(); };
     $("#porcobrar").onchange = (ev) => { ui.porCobrar = ev.target.checked; this.pintar(); };
   },
